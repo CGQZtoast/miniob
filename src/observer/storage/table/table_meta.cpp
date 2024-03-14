@@ -101,6 +101,20 @@ RC TableMeta::add_index(const IndexMeta &index)
   return RC::SUCCESS;
 }
 
+RC TableMeta::delete_index(const char* index_name) {
+  vector<IndexMeta>::iterator it = indexes_.begin();
+  while (it != indexes_.end()) {
+    if (0 == strcmp((*it).name(), index_name)) {
+      it = indexes_.erase(it);
+      break;
+    }
+    else {
+      it++;
+    }
+  }
+  return RC::SUCCESS;
+}
+
 const char *TableMeta::name() const { return name_.c_str(); }
 
 const FieldMeta *TableMeta::trx_field() const { return &fields_[0]; }

@@ -430,6 +430,75 @@ RC Table::create_index(Trx *trx, const FieldMeta *field_meta, const char *index_
   return rc;
 }
 
+RC Table::drop_index(Trx *trx, const char *index_name) {
+  if (common::is_blank(index_name)) {
+    LOG_INFO("Invalid input arguments, table name is %s, index_name is blank or attribute_name is blank", name());
+    return RC::INVALID_ARGUMENT;
+  }
+  
+  // 删除内存中的索引
+  vector<Index *>::iterator it = indexes_.begin();
+  while (it != indexes_.end()) {
+    if (0 == strcmp((*it)->index_meta().name(), index_name)) {
+      it = indexes_.erase(it);
+      break;
+    }
+    else {
+      it++;
+    }
+  }
+
+  // 删除索引文件
+  std::string index_file = table_index_file(base_dir_.c_str(), name(), index_name);
+  if (remove(index_file.c_str()) != 0) {
+    LOG_ERROR("Failed to delete index file. file name=%s, errmsg=%s", index_file, strerror(errno));
+  }
+  else {
+    LOG_INFO("Successfully delete index file, file_name:%s", index_file);
+  }
+
+  // 删除表元数据中的索引
+  TableMeta new_table_meta(table_meta_);
+  RC rc = new_table_meta.delete_index(index_name);
+  if (rc != RC::SUCCESS) {
+    LOG_ERROR("Failed to delete index (%s) on table (%s). error=%d:%s", index_name, name(), rc, strrc(rc));
+    return rc;
+  }
+
+  /// 内存中有一份元数据，磁盘文件也有一份元数据。修改磁盘文件时，先创建一个临时文件，写入完成后再rename为正式文件
+  /// 这样可以防止文件内容不完整
+  // 创建元数据临时文件
+  std::string  tmp_file = table_meta_file(base_dir_.c_str(), name()) + ".tmp";
+  std::fstream fs;
+  fs.open(tmp_file, std::ios_base::out | std::ios_base::binary | std::ios_base::trunc);
+  if (!fs.is_open()) {
+    LOG_ERROR("Failed to open file for write. file name=%s, errmsg=%s", tmp_file.c_str(), strerror(errno));
+    return RC::IOERR_OPEN;  // 删除索引中途出错，要做还原操作
+  }
+  if (new_table_meta.serialize(fs) < 0) {
+    LOG_ERROR("Failed to dump new table meta to file: %s. sys err=%d:%s", tmp_file.c_str(), errno, strerror(errno));
+    return RC::IOERR_WRITE;
+  }
+  fs.close();
+
+  // 覆盖原始元数据文件
+  std::string meta_file = table_meta_file(base_dir_.c_str(), name());
+
+  int ret = rename(tmp_file.c_str(), meta_file.c_str());
+  if (ret != 0) {
+    LOG_ERROR("Failed to rename tmp meta file (%s) to normal meta file (%s) while creating index (%s) on table (%s). "
+              "system error=%d:%s",
+              tmp_file.c_str(), meta_file.c_str(), index_name, name(), errno, strerror(errno));
+    return RC::IOERR_WRITE;
+  }
+
+  table_meta_.swap(new_table_meta);
+
+  LOG_INFO("Successfully delete a index (%s) on the table (%s)", index_name, name());
+  
+  return rc;
+}
+
 RC Table::delete_record(const Record &record)
 {
   RC rc = RC::SUCCESS;
