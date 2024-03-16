@@ -457,6 +457,10 @@ RC Table::drop_index(Trx *trx, const char *index_name) {
     LOG_INFO("Successfully delete index file, file_name:%s", index_file);
   }
 
+  // 删除buffer_pools_中的数据
+  BufferPoolManager &bpm = BufferPoolManager::instance();
+  bpm.close_file(index_file.c_str());
+
   // 删除表元数据中的索引
   TableMeta new_table_meta(table_meta_);
   RC rc = new_table_meta.delete_index(index_name);
